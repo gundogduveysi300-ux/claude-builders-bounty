@@ -36,6 +36,7 @@ You're in the right place.
 ### Installation
 
 Run: ./install.sh
+Requires: jq
 
 The installer registers the hook for Claude Code's Bash tool.
 
