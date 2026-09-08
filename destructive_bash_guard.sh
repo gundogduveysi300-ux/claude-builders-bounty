@@ -17,10 +17,27 @@ PROJECT_PATH="$(printf '%s' "$INPUT" | jq -r '.cwd // empty')"
 
 REASON=""
 
-# rm -rf / rm -fr
+# rm -rf / rm -fr / rm -r -f / rm -f -r
 if printf '%s\n' "$COMMAND" |
-    grep -Eiq '(^|[;&|[:space:]])rm[[:space:]]+-[^[:space:]]*[rf][^[:space:]]*[rf][^[:space:]]*([[:space:]]|$)'; then
-    REASON="Blocked destructive command: rm -rf"
+    grep -Eiq '(^|[;&|[:space:]])rm([[:space:]]+-[^[:space:]]*)*[[:space:]]+.*'; then
+
+    RM_ARGS="$(printf '%s\n' "$COMMAND" |
+        sed -E 's/.*(^|[;&|[:space:]])rm[[:space:]]+//')"
+
+    HAS_RECURSIVE=0
+    HAS_FORCE=0
+
+    printf '%s\n' "$RM_ARGS" |
+        grep -Eiq '(^|[[:space:]])-[^[:space:]]*r[^[:space:]]*([[:space:]]|$)|--recursive' &&
+        HAS_RECURSIVE=1
+
+    printf '%s\n' "$RM_ARGS" |
+        grep -Eiq '(^|[[:space:]])-[^[:space:]]*f[^[:space:]]*([[:space:]]|$)|--force' &&
+        HAS_FORCE=1
+
+    if [ "$HAS_RECURSIVE" -eq 1 ] && [ "$HAS_FORCE" -eq 1 ]; then
+        REASON="Blocked destructive command: rm -rf"
+    fi
 fi
 
 # git push --force / git push -f

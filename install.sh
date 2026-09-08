@@ -25,13 +25,25 @@ fi
 
 UPDATED="$(printf '%s' "$SETTINGS" | jq \
     --arg hook "$HOOK_TARGET" \
-    '.hooks.PreToolUse = ((.hooks.PreToolUse // []) + [{
-        matcher: "Bash",
-        hooks: [{
-            type: "command",
-            command: $hook
+    '
+    .hooks = (.hooks // {}) |
+    .hooks.PreToolUse = (
+        (.hooks.PreToolUse // [])
+        | map(
+            select(
+                .hooks == null
+                or all(.hooks[]; .command != $hook)
+            )
+        )
+        + [{
+            matcher: "Bash",
+            hooks: [{
+                type: "command",
+                command: $hook
+            }]
         }]
-    }])')"
+    )
+    ')"
 
 printf '%s\n' "$UPDATED" > "$SETTINGS_FILE"
 
