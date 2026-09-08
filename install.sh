@@ -39,7 +39,8 @@ UPDATED="$(printf '%s' "$SETTINGS" | jq \
             matcher: "Bash",
             hooks: [{
                 type: "command",
-                command: $hook
+                command: $hook,
+                timeout: 10
             }]
         }]
     )
@@ -50,3 +51,4 @@ printf '%s\n' "$UPDATED" > "$SETTINGS_FILE"
 echo "Destructive Bash guard installed successfully."
 echo "Hook: $HOOK_TARGET"
 echo "Settings: $SETTINGS_FILE"
+echo "Timeout: 10 seconds"

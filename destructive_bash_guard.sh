@@ -11,13 +11,15 @@ INPUT="$(cat)"
 
 COMMAND="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')"
 PROJECT_PATH="$(printf '%s' "$INPUT" | jq -r '.cwd // empty')"
+TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // "Bash"')"
 
+[ "$TOOL_NAME" != "Bash" ] && exit 0
 [ -z "$COMMAND" ] && exit 0
 [ -z "$PROJECT_PATH" ] && PROJECT_PATH="$(pwd)"
 
 REASON=""
 
-# rm -rf / rm -fr / rm -r -f / rm -f -r
+# Block rm when both recursive and force flags are present.
 if printf '%s\n' "$COMMAND" |
     grep -Eiq '(^|[;&|[:space:]])rm([[:space:]]+-[^[:space:]]*)*[[:space:]]+.*'; then
 
@@ -36,42 +38,59 @@ if printf '%s\n' "$COMMAND" |
         HAS_FORCE=1
 
     if [ "$HAS_RECURSIVE" -eq 1 ] && [ "$HAS_FORCE" -eq 1 ]; then
-        REASON="Blocked destructive command: rm -rf"
+        REASON="Blocked: rm uses both recursive and force flags and can permanently delete directory trees."
     fi
 fi
 
-# git push --force / git push -f
+# Block git push --force / -f, but allow --force-with-lease.
 if [ -z "$REASON" ] &&
    printf '%s\n' "$COMMAND" |
    grep -Eiq '(^|[;&|[:space:]])git[[:space:]]+push([^;&|]*)[[:space:]](--force|-f)([[:space:]]|$)'; then
-    REASON="Blocked destructive command: git push --force"
+    REASON="Blocked: git push --force can rewrite remote history and discard commits."
 fi
 
-# DROP TABLE
+# Block DROP TABLE.
 if [ -z "$REASON" ] &&
    printf '%s\n' "$COMMAND" |
    grep -Eiq 'DROP[[:space:]]+TABLE'; then
-    REASON="Blocked destructive command: DROP TABLE"
+    REASON="Blocked: DROP TABLE permanently removes a database table and its data."
 fi
 
-# TRUNCATE / TRUNCATE TABLE
+# Block TRUNCATE / TRUNCATE TABLE.
 if [ -z "$REASON" ] &&
    printf '%s\n' "$COMMAND" |
    grep -Eiq 'TRUNCATE([[:space:]]+TABLE)?'; then
-    REASON="Blocked destructive command: TRUNCATE"
+    REASON="Blocked: TRUNCATE permanently removes all rows from a table."
 fi
 
-# DELETE FROM without WHERE
+# Block DELETE FROM statements that do not contain WHERE.
 if [ -z "$REASON" ] &&
    printf '%s\n' "$COMMAND" |
    grep -Eiq 'DELETE[[:space:]]+FROM'; then
 
-    DELETE_PART="$(printf '%s\n' "$COMMAND" |
-        sed -n 's/.*[Dd][Ee][Ll][Ee][Tt][Ee][[:space:]]\+[Ff][Rr][Oo][Mm][[:space:]]*\(.*\)/\1/p')"
+    OLDIFS="$IFS"
+    IFS=';'
+    HAS_UNSAFE_DELETE=0
 
-    if ! printf '%s\n' "$DELETE_PART" |
-        grep -Eiq 'WHERE'; then
-        REASON="Blocked destructive command: DELETE FROM without WHERE"
+    # Split chained SQL statements so a WHERE in another statement
+    # cannot make an unsafe DELETE look safe.
+    read -ra STATEMENTS <<< "$COMMAND"
+    IFS="$OLDIFS"
+
+    for STATEMENT in "${STATEMENTS[@]}"; do
+        if printf '%s\n' "$STATEMENT" |
+            grep -Eiq 'DELETE[[:space:]]+FROM'; then
+
+            if ! printf '%s\n' "$STATEMENT" |
+                grep -Eiq 'WHERE'; then
+                HAS_UNSAFE_DELETE=1
+                break
+            fi
+        fi
+    done
+
+    if [ "$HAS_UNSAFE_DELETE" -eq 1 ]; then
+        REASON="Blocked: DELETE FROM without WHERE can remove every row from a table."
     fi
 fi
 
@@ -79,10 +98,11 @@ fi
 
 TIMESTAMP="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-printf '%s\tproject=%s\tcommand=%s\n' \
+printf '%s\tproject=%s\tcommand=%s\treason=%s\n' \
     "$TIMESTAMP" \
     "$PROJECT_PATH" \
-    "$COMMAND" >> "$LOG_FILE"
+    "$COMMAND" \
+    "$REASON" >> "$LOG_FILE"
 
 jq -n \
     --arg reason "$REASON" \
@@ -95,4 +115,3 @@ jq -n \
     }'
 
 exit 0
-

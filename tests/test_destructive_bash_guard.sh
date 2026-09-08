@@ -36,7 +36,8 @@ assert_blocked() {
         }')"
 
     output="$(printf '%s' "$input" | "$HOOK")"
-    decision="$(printf '%s' "$output" | jq -r '.hookSpecificOutput.permissionDecision // empty')"
+    decision="$(printf '%s' "$output" |
+        jq -r '.hookSpecificOutput.permissionDecision // empty')"
 
     if [ "$decision" = "deny" ] &&
        printf '%s' "$output" | grep -Fq "$expected"; then
@@ -81,80 +82,100 @@ assert_allowed() {
 
 printf '%s\n' "=== Destructive command tests ==="
 
-assert_blocked \
-    "rm -rf" \
+assert_blocked "rm -rf" \
     "rm -rf /tmp/test" \
-    "rm -rf"
+    "rm uses both recursive and force flags"
 
-assert_blocked \
-    "rm -fr" \
+assert_blocked "rm -fr" \
     "rm -fr /tmp/test" \
-    "rm -rf"
+    "rm uses both recursive and force flags"
 
-assert_blocked \
-    "git push --force" \
+assert_blocked "rm -r -f" \
+    "rm -r -f /tmp/test" \
+    "rm uses both recursive and force flags"
+
+assert_blocked "rm -f -r" \
+    "rm -f -r /tmp/test" \
+    "rm uses both recursive and force flags"
+
+assert_blocked "rm long flags" \
+    "rm --recursive --force /tmp/test" \
+    "rm uses both recursive and force flags"
+
+assert_blocked "git push --force" \
     "git push --force origin main" \
     "git push --force"
 
-assert_blocked \
-    "git push -f" \
+assert_blocked "git push -f" \
     "git push -f origin main" \
     "git push --force"
 
-assert_blocked \
-    "DROP TABLE" \
+assert_blocked "DROP TABLE" \
     "DROP TABLE users" \
     "DROP TABLE"
 
-assert_blocked \
-    "TRUNCATE TABLE" \
+assert_blocked "TRUNCATE TABLE" \
     "TRUNCATE TABLE users" \
     "TRUNCATE"
 
-assert_blocked \
-    "TRUNCATE" \
+assert_blocked "TRUNCATE" \
     "TRUNCATE users" \
     "TRUNCATE"
 
-assert_blocked \
-    "DELETE FROM without WHERE" \
+assert_blocked "DELETE FROM without WHERE" \
     "DELETE FROM users" \
     "DELETE FROM without WHERE"
 
-assert_blocked \
-    "case-insensitive DROP TABLE" \
+assert_blocked "DELETE in chained SQL" \
+    "DELETE FROM users; echo done" \
+    "DELETE FROM without WHERE"
+
+assert_blocked "DELETE followed by unrelated WHERE" \
+    "DELETE FROM users; echo WHERE id=1" \
+    "DELETE FROM without WHERE"
+
+assert_blocked "case-insensitive DROP TABLE" \
     "drop table users" \
     "DROP TABLE"
 
-assert_blocked \
-    "quoted command" \
+assert_blocked "case-insensitive DELETE" \
+    "delete from users" \
+    "DELETE FROM without WHERE"
+
+assert_blocked "quoted command with rm" \
     'echo "hello world" && rm -rf /tmp/test' \
-    "rm -rf"
+    "rm uses both recursive and force flags"
 
 printf '\n%s\n' "=== Safe command tests ==="
 
-assert_allowed \
-    "ls" \
+assert_allowed "ls" \
     "ls -la"
 
-assert_allowed \
-    "git status" \
+assert_allowed "git status" \
     "git status"
 
-assert_allowed \
-    "normal git push" \
+assert_allowed "normal git push" \
     "git push origin main"
 
-assert_allowed \
-    "DELETE with WHERE" \
+assert_allowed "force-with-lease" \
+    "git push --force-with-lease origin main"
+
+assert_allowed "rm -f only" \
+    "rm -f file.txt"
+
+assert_allowed "rm -r only" \
+    "rm -r folder"
+
+assert_allowed "DELETE with WHERE" \
     "DELETE FROM users WHERE id=1"
 
-assert_allowed \
-    "echo" \
+assert_allowed "DELETE chained with WHERE" \
+    "DELETE FROM users WHERE id=1; echo done"
+
+assert_allowed "echo" \
     "echo hello"
 
-assert_allowed \
-    "npm test" \
+assert_allowed "npm test" \
     "npm test"
 
 printf '\n%s\n' "=== Result ==="
